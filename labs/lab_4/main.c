@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <matrix.h>
+#include "/usr/local/include/labvolt/inc/labvolt.h"
 
 int main (int argc, char *argv[])
 {

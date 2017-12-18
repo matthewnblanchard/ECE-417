@@ -10,11 +10,20 @@
 #include <string.h>
 #include <float.h>
 #include <math.h>
+#include <unistd.h>
+#include "/usr/local/include/labvolt/inc/labvolt.h"
 
 // Trig conversions
 #define PI 3.14159265
 #define RAD(X) ((X) * PI / 180)
 #define DEG(X) ((X) * 180 / PI)
+
+// Joint angle --> motor step macros
+#define BASE(X) 6500/360*X
+#define SHOULDER(X) 8600/360*X
+#define ELBOW(X) 8600/360*X
+#define M4(X) 6500/360*X
+#define M5(X) 6500/360*X
 
 // Lab-Volt Parameters
 extern float param_d[5];
@@ -106,5 +115,32 @@ void param_matrix_fwd(float m[4][4], float d, float a, float alpha, float theta)
 //      float m[4][4]   Transformation matrix from 0 to 5
 //      float theta[5]  Joint angles
 void joint_angle_inv(float m[4][4], float theta[5]);
+
+// float[5] robot_set_joint_angles(float angle_i[5], float angle_f[5])
+// Desc: Moves the robot from the angles given by angle_i to the angles
+//      given by angle_f, then returns the new angles
+// Args:
+//      float angle_f[5]  Target joint angles
+void robot_set_joint_angles(float angle_f[5]);
+
+// void robot_move_point(float p[3])
+// Desc: Moves the robot from its current position to the position given
+//	by p[3]
+// Args:
+//	float p[3]	3-D point
+void robot_move_point(float p[3]);
+
+// void gripper_set(bool state)
+// Desc: Open/close the gripper
+// Args:
+//	bool state: Desired gripped state. 1 = closed, 0 = open
+void gripper_set(int state);
+
+// void robot_move_point_straight(float p[3])
+// Desc: Moves the robot from its current position to the position
+//	given by p[3], in a straight line
+// Args:
+//	float p[3]	3-D point
+void robot_move_point_straight(float p[3]);
 
 #endif

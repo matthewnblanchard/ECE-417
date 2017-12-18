@@ -4,10 +4,14 @@
 
 #include "../matrix.h"
 
+// Joint parameters
 float param_d[5]        = {27.2, 0, 0, 0, 10.5};
 float param_theta[5]    = {0, 0, 0, 90, 0};
 float param_a[5]        = {0, 19.2, 19.2, 0, 0};
 float param_alpha[5]    = {90, 180, 0, 90, 0};
+
+// Current position
+float pcur[3]		= {16.1234549798, 0, 40.776450202};
 
 void h_matrix_mult(float a[4][4], float b[4][4], float c[4][4])
 {
@@ -239,29 +243,31 @@ void joint_angle_inv(float m[4][4], float theta[5])
         float x = m[0][3] - (param_d[4] * m[0][2]);
         float y = m[1][3] - (param_d[4] * m[1][2]);
         float z = m[2][3] - (param_d[4] * m[2][2]);
-       
-        printf("x=%f, y=%f, z=%f\r\n", x, y, z);
 
         // Compute a and z_f
         float a = sqrt(pow(x,2) + pow(y,2));
         float z_f = z - param_d[0];
 
-        printf("a=%f, z_f=%f\r\n", a, z_f);
-
         // Compute angle 1
-        theta[0] = DEG(atan2(y, x));
+        y = (((y < 0.0000001) && (y > 0)) || ((y > -0.0000001) && (y < 0))) ? 0 : y;
+        x = (((x < 0.0000001) && (x > 0)) || ((x > -0.0000001) && (x < 0))) ? 0 : x;
+        theta[0] = ((y == 0) && (x == 0)) ? 0 : DEG(atan2(y, x));
 
         // Intermediate var to guard against acos(>1) due to floating point percision issues
         float intr = (pow(a,2) + pow(z_f,2) - pow(param_a[1],2) - pow(param_a[2],2)) / (2 * param_a[1] * param_a[2]);
-        (intr > 1.0) ? (intr = 0.99999) : (intr = intr);
 
         // Compute angle 3
-        theta[2] = DEG(acos((pow(a,2) + pow(z_f,2) - pow(param_a[1],2) - pow(param_a[2],2)) / (2 * param_a[1] * param_a[2])));
+        theta[2] = (intr >= 1) ? 0 : DEG(acos(intr));
 
         // Compute angle 2
         theta[1] = DEG(atan2(z_f, a)) + DEG(atan2(param_a[2] * sin(RAD(theta[2])), param_a[1] + (param_a[2] * cos(RAD(theta[2])))));
 
-        // Compute 3_T_0
+        theta[0] = ((y == 0) && (x == 0)) ? 0 : DEG(atan2(y, x));
+	if (((param_a[2] * cos(RAD(theta[2] - theta[1]))) + (param_a[1] * cos(RAD(theta[1])))) < 0) {
+		theta[0] += 180;
+	}
+        
+	// Compute 3_T_0
         float n[4][4];
         n[0][0] = cos(RAD(theta[0])) * cos(RAD(theta[2] - theta[1]));
         n[0][1] = sin(RAD(theta[0])) * cos(RAD(theta[2] - theta[1]));
@@ -291,4 +297,129 @@ void joint_angle_inv(float m[4][4], float theta[5])
         theta[4] = DEG(atan2(o[2][0], o[2][1]));
 
         return;
-}
+};
+
+void robot_set_joint_angles(float angle_f[5])
+{
+        float angle_delta[5];   // Angles which the robot must move each joint to change positions
+        int i = 0;              // Loop index 
+	float angle_M4 = 0;	// Motor 4 angle
+	float angle_M5 = 0;	// Motor 5 angle
+	static float angle_i[5] = {0, 135, 135, 0, 0};	// Starting joint angles
+
+        // Calculate base angle changes
+        for (i = 0; i < 5; i++) {
+                angle_delta[i] = angle_f[i] - angle_i[i];
+        };
+
+        // The base angle is independent of all others. All other angles are dependent on each other
+        angle_delta[2] -= angle_delta[1];  // Elbox compensation for shoulder
+	
+	angle_M4 = angle_delta[3] - angle_delta[4] + angle_delta[2];
+	angle_M5 = -angle_delta[3] - angle_delta[4] - angle_delta[2];
+
+        moverel(
+                BASE(angle_delta[0]),
+                SHOULDER(angle_delta[1]),
+                ELBOW(angle_delta[2]),
+                M4(angle_M4),
+                M5(angle_M5));
+
+	for (i = 0; i < 5; i++) {
+		printf("Setting angle %d from %f to %f\r\n", i, angle_i[i], angle_f[i]);
+		angle_i[i] = angle_f[i];
+	};
+        
+        return;
+};
+
+void robot_move_point(float p[3])
+{
+	float t[4][4];	// Transformation matrix
+	float theta[5];	// Joint angles
+	
+	// Constant rotation matrix for gripper pointed down
+	t[0][0] = 0; 
+	t[1][0] = -1;
+	t[2][0] = 0;
+	
+	t[0][1] = 0;
+	t[1][1] = 0;
+	t[2][1] = 1;
+	
+	t[0][2] = -1;
+	t[1][2] = 0;
+	t[2][2] = 0;
+
+	// Bottom row of 0's & 1's
+	t[3][0] = 0;
+	t[3][1] = 0;
+	t[3][2] = 0;
+	t[3][3] = 1;
+
+	// Input xyz
+	t[0][3] = p[0];
+	t[1][3] = p[1];
+	t[2][3] = p[2];	
+
+	printf("Moving to point:\r\n");
+	print_matrix(t);	
+
+	// Use inverse kinematics to calculate the joint angles, then move
+	joint_angle_inv(t, theta);
+
+	printf("Adjusting to angles: %f, %f, %f, %f, %f\r\n", theta[0], theta[1], theta[2], theta[3], theta[4]);
+
+	robot_set_joint_angles(theta);
+
+	// Save point
+	pcur[0] = p[0];
+	pcur[1] = p[1];
+	pcur[2] = p[2];
+
+	return;
+};
+
+void gripper_set(int state)
+{
+	(state == 1) ? gripperClose() : gripperOpen();
+	return;
+};
+
+void robot_move_point_straight(float p[3])
+{
+	int i = 0;			// Loop index
+	float pdelta[3];		// Position change
+	float len = 0;			// Length of linear movement
+	float punit[3];			// Unit vector
+	float pmove[3];			// Intermediary moves
+	
+	pdelta[0] = p[0] - pcur[0];
+	pdelta[1] = p[1] - pcur[1];
+	pdelta[2] = p[2] - pcur[2];
+
+	// Calculate line length
+	len = sqrt(pow(pdelta[0], 2) + pow(pdelta[1], 2) + pow(pdelta[2], 2));
+
+	// Calculate 1cm intervals
+	punit[0] = pdelta[0] / len;
+	punit[1] = pdelta[1] / len;
+	punit[2] = pdelta[2] / len;
+
+	// Move until we've traversed the entire length
+	for (i = 0; i < len; i++) {
+
+		// Calculate points after a unit step
+		pmove[0] = pcur[0] + punit[0];
+		pmove[1] = pcur[1] + punit[1];
+		pmove[2] = pcur[2] + punit[2];
+		
+		// Move one unit forward
+		robot_move_point(pmove);
+	};
+		
+	// Complete the move
+	robot_move_point(p);
+			
+	return;
+};
